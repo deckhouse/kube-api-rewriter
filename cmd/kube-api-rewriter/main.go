@@ -21,7 +21,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/deckhouse/kube-api-rewriter/pkg/kubevirt"
+	"github.com/deckhouse/kube-api-rewriter/pkg/loader"
 	logutil "github.com/deckhouse/kube-api-rewriter/pkg/log"
 	"github.com/deckhouse/kube-api-rewriter/pkg/monitoring/healthz"
 	"github.com/deckhouse/kube-api-rewriter/pkg/monitoring/metrics"
@@ -79,16 +79,8 @@ func main() {
 		Output: os.Getenv(logOutputEnv),
 	})
 
-	// Load rules from file or use default kubevirt rules.
-	rewriteRules := kubevirt.KubevirtRewriteRules
-	if os.Getenv("RULES_PATH") != "" {
-		rulesFromFile, err := rewriter.LoadRules(os.Getenv("RULES_PATH"))
-		if err != nil {
-			log.Error("Load rules from %s: %v", os.Getenv("RULES_PATH"), err)
-			os.Exit(1)
-		}
-		rewriteRules = rulesFromFile
-	}
+	// Load rules from the holder.
+	rewriteRules := loader.GetRules()
 	rewriteRules.Init()
 
 	// Init and register metrics.
