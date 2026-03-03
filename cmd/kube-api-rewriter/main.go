@@ -17,19 +17,8 @@ limitations under the License.
 package main
 
 import (
-	log "log/slog"
-	"net/http"
-	"os"
-
-	"github.com/deckhouse/kube-api-rewriter/pkg/loader"
-	logutil "github.com/deckhouse/kube-api-rewriter/pkg/log"
-	"github.com/deckhouse/kube-api-rewriter/pkg/monitoring/healthz"
-	"github.com/deckhouse/kube-api-rewriter/pkg/monitoring/metrics"
-	"github.com/deckhouse/kube-api-rewriter/pkg/monitoring/profiler"
-	"github.com/deckhouse/kube-api-rewriter/pkg/proxy"
+	"github.com/deckhouse/kube-api-rewriter/pkg/app"
 	"github.com/deckhouse/kube-api-rewriter/pkg/rewriter"
-	"github.com/deckhouse/kube-api-rewriter/pkg/server"
-	"github.com/deckhouse/kube-api-rewriter/pkg/target"
 )
 
 // This proxy is a proof-of-concept of proxying Kubernetes API requests
@@ -43,174 +32,52 @@ import (
 // apiVersion: v1
 // kind: Config
 // clusters:
-// - cluster:
-//   server: http://127.0.0.1:23915
-//   name: proxy.api.server
+//   - cluster:
+//     server: http://127.0.0.1:23915
+//     name: proxy.api.server
+//
 // contexts:
-// - context:
-//   cluster: proxy.api.server
-//   name: proxy.api.server
+//   - context:
+//     cluster: proxy.api.server
+//     name: proxy.api.server
+//
 // current-context: proxy.api.server
 
-const (
-	loopbackAddr              = "127.0.0.1"
-	anyAddr                   = "0.0.0.0"
-	defaultAPIClientProxyPort = "23915"
-	defaultWebhookProxyPort   = "24192"
-)
-
-const (
-	logLevelEnv  = "LOG_LEVEL"
-	logFormatEnv = "LOG_FORMAT"
-	logOutputEnv = "LOG_OUTPUT"
-)
-
-const (
-	MonitoringBindAddress        = "MONITORING_BIND_ADDRESS"
-	DefaultMonitoringBindAddress = ":9090"
-	PprofBindAddressEnv          = "PPROF_BIND_ADDRESS"
-)
-
 func main() {
-	// Set options for the default logger: level, format and output.
-	logutil.SetupDefaultLoggerFromEnv(logutil.Options{
-		Level:  os.Getenv(logLevelEnv),
-		Format: os.Getenv(logFormatEnv),
-		Output: os.Getenv(logOutputEnv),
-	})
+	app.StartFromEnv(exampleRules())
+}
 
-	// Load rules from the holder.
-	rewriteRules := loader.GetRules()
-	rewriteRules.Init()
-
-	// Init and register metrics.
-	metrics.Init()
-	proxy.RegisterMetrics()
-
-	httpServers := make([]*server.HTTPServer, 0)
-
-	// Now add proxy workers with rewriters.
-	hasRewriter := false
-
-	// Register direct proxy from local Kubernetes API client to Kubernetes API server.
-	if os.Getenv("CLIENT_PROXY") == "no" {
-		log.Info("Will not start client proxy: CLIENT_PROXY=no")
-	} else {
-		config, err := target.NewKubernetesTarget()
-		if err != nil {
-			log.Error("Load Kubernetes REST", logutil.SlogErr(err))
-			os.Exit(1)
-		}
-		lAddr := server.ConstructListenAddr(
-			os.Getenv("CLIENT_PROXY_ADDRESS"), os.Getenv("CLIENT_PROXY_PORT"),
-			loopbackAddr, defaultAPIClientProxyPort)
-		rwr := &rewriter.RuleBasedRewriter{
-			Rules: rewriteRules,
-		}
-		proxyHandler := &proxy.Handler{
-			Name:         "kube-api",
-			TargetClient: config.Client,
-			TargetURL:    config.APIServerURL,
-			ProxyMode:    proxy.ToRenamed,
-			Rewriter:     rwr,
-		}
-		proxyHandler.Init()
-		proxySrv := &server.HTTPServer{
-			InstanceDesc: "API Client proxy",
-			ListenAddr:   lAddr,
-			RootHandler:  proxyHandler,
-		}
-		httpServers = append(httpServers, proxySrv)
-		hasRewriter = true
+// exampleRules can be used as a simple illustration of the setup that rewrites CRD
+// with kind SomeConfig in the api group some.crd.group.io into InternalResourceSomeConfig
+// kind in the api group internalresourcesomeconfigs.some.internalresource.renamedgroup.io.
+func exampleRules() *rewriter.RewriteRules {
+	return &rewriter.RewriteRules{
+		KindPrefix:         "InternalResource",
+		ResourceTypePrefix: "internalresource",
+		ShortNamePrefix:    "intres",
+		Categories:         []string{"intres"},
+		Rules: map[string]rewriter.APIGroupRule{
+			"some.crd.group.io": {
+				GroupRule: rewriter.GroupRule{
+					Group:            "some.crd.group.io",
+					Versions:         []string{"v1beta1"},
+					PreferredVersion: "v1beta1",
+					Renamed:          "some.internalresource.renamedgroup.io",
+				},
+				ResourceRules: map[string]rewriter.ResourceRule{
+					// someconfigs.some.crd.group.io
+					"someconfigs": {
+						Kind:             "SomeConfig",
+						ListKind:         "SomeConfigList",
+						Plural:           "someconfigs",
+						Singular:         "someconfig",
+						Versions:         []string{"v1beta1"},
+						PreferredVersion: "v1beta1",
+						Categories:       []string{},
+						ShortNames:       []string{},
+					},
+				},
+			},
+		},
 	}
-
-	// Register reverse proxy from Kubernetes API server to local webhook server.
-	if os.Getenv("WEBHOOK_ADDRESS") == "" {
-		log.Info("Will not start webhook proxy for empty WEBHOOK_ADDRESS")
-	} else {
-		config, err := target.NewWebhookTarget()
-		if err != nil {
-			log.Error("Configure webhook client", logutil.SlogErr(err))
-			os.Exit(1)
-		}
-		lAddr := server.ConstructListenAddr(
-			os.Getenv("WEBHOOK_PROXY_ADDRESS"), os.Getenv("WEBHOOK_PROXY_PORT"),
-			anyAddr, defaultWebhookProxyPort)
-		rwr := &rewriter.RuleBasedRewriter{
-			Rules: rewriteRules,
-		}
-		proxyHandler := &proxy.Handler{
-			Name:         "webhook",
-			TargetClient: config.Client,
-			TargetURL:    config.URL,
-			ProxyMode:    proxy.ToOriginal,
-			Rewriter:     rwr,
-		}
-		proxyHandler.Init()
-		proxySrv := &server.HTTPServer{
-			InstanceDesc: "Webhook proxy",
-			ListenAddr:   lAddr,
-			RootHandler:  proxyHandler,
-			CertManager:  config.CertManager,
-		}
-		httpServers = append(httpServers, proxySrv)
-		hasRewriter = true
-	}
-
-	if !hasRewriter {
-		log.Info("No proxy rewriters to start, exit. Check CLIENT_PROXY and WEBHOOK_ADDRESS environment variables.")
-		return
-	}
-
-	// Always add monitoring server with metrics and healthz probes
-	{
-		lAddr := os.Getenv(MonitoringBindAddress)
-		if lAddr == "" {
-			lAddr = DefaultMonitoringBindAddress
-		}
-
-		monMux := http.NewServeMux()
-		healthz.AddHealthzHandler(monMux)
-		metrics.AddMetricsHandler(monMux)
-
-		monSrv := &server.HTTPServer{
-			InstanceDesc: "Monitoring handlers",
-			ListenAddr:   lAddr,
-			RootHandler:  monMux,
-			CertManager:  nil,
-			Err:          nil,
-		}
-		httpServers = append(httpServers, monSrv)
-	}
-
-	// Enable pprof server if bind address is specified.
-	pprofBindAddress := os.Getenv(PprofBindAddressEnv)
-	if pprofBindAddress != "" {
-		pprofHandler := profiler.NewPprofHandler()
-
-		pprofSrv := &server.HTTPServer{
-			InstanceDesc: "Pprof",
-			ListenAddr:   pprofBindAddress,
-			RootHandler:  pprofHandler,
-		}
-		httpServers = append(httpServers, pprofSrv)
-	}
-
-	// Start all registered servers and block the main process until at least one server stops.
-	group := server.NewRunnableGroup()
-	for i := range httpServers {
-		group.Add(httpServers[i])
-	}
-	// Block while servers are running.
-	group.Start()
-
-	// Log errors for each instance and exit.
-	exitCode := 0
-	for _, srv := range httpServers {
-		if srv.Err != nil {
-			log.Error(srv.InstanceDesc, logutil.SlogErr(srv.Err))
-			exitCode = 1
-		}
-	}
-	os.Exit(exitCode)
 }
