@@ -35,6 +35,58 @@ It can rewrite:
 8. Patches.
 9. Payloads in watch streams.
 
+## Configuration
+
+Default method is to use environment variables.
+
+### Client proxy
+
+#### Listen settings
+
+**CLIENT_PROXY_ADDRESS** — address to listen for incoming requests from the controller. Default is 127.0.0.1
+
+**CLIENT_PROXY_PORT** — port to listen for incoming requests from the controller. Default is 23915.
+
+**CLIENT_PROXY** — flag to disable client proxy. Set to "no" for testing purposes.
+
+#### Target settings
+
+Target is a Kubernetes API server. Use go-client environment variables, or in-cluster client will be initialized.
+
+At least, set api-server address with the `KUBERNETES_MASTER` env.
+
+### Webhook proxy
+
+#### Listen settings
+
+**WEBHOOK_PROXY_ADDRESS** — address to listen for incoming requests from the Kubernetes API server. Default is 0.0.0.0
+
+**WEBHOOK_PROXY_PORT** — port to listen for incoming requests from the Kubernetes API server. Default is 24192.
+
+#### Target settings
+
+**WEBHOOK_ADDRESS** — address of the webhook in the controller. Webhook proxy is disabled if this address is empty.
+
+**WEBHOOK_SERVER_NAME** — server name to use in TLS client.
+
+**WEBHOOK_CERT_FILE** — file name with the certificate of the webhook server.
+
+**WEBHOOK_KEY_NAME** — file name with the private key for the certificate.
+
+### Logging
+
+**LOG_LEVEL** — set logging level: debug, info, warn, error. Default is "info".
+
+**LOG_FORMAT** — set logging format: json, text, or pretty. Default is "json".
+
+**LOG_OUTPUT** — set logging output: stdout, stderr, or discard. Default is "stdout".
+
+### Other
+
+**MONITORING_BIND_ADDRESS** — address of the metrics server. Default is :9090.
+
+**PPROF_BIND_ADDRESS** — address of the pprof server. Pprof is disabled if empty.
+
 ## History
 
 **02.03.2026**

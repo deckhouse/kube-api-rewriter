@@ -47,17 +47,33 @@ var (
 	defaultWebhookAddress = "https://127.0.0.1:9443"
 )
 
-func NewWebhookTarget() (*Webhook, error) {
+type WebhookTargetSettings struct {
+	Address      string
+	ServerName   string
+	CertFileName string
+	KeyFileName  string
+}
+
+func WebhookTargetSettingsFromEnv() WebhookTargetSettings {
+	return WebhookTargetSettings{
+		Address:      os.Getenv(WebhookAddressVar),
+		ServerName:   os.Getenv(WebhookServerNameVar),
+		CertFileName: os.Getenv(WebhookCertFileVar),
+		KeyFileName:  os.Getenv(WebhookKeyFileVar),
+	}
+}
+
+func NewWebhookTarget(settings WebhookTargetSettings) (*Webhook, error) {
 	var err error
 	webhook := &Webhook{}
 
 	// Target address and serverName.
-	address := os.Getenv(WebhookAddressVar)
+	address := settings.Address
 	if address == "" {
 		address = defaultWebhookAddress
 	}
 
-	serverName := os.Getenv(WebhookServerNameVar)
+	serverName := settings.ServerName
 	if serverName == "" {
 		serverName = address
 	}
@@ -68,8 +84,8 @@ func NewWebhookTarget() (*Webhook, error) {
 	}
 
 	// Certificate settings.
-	certFile := os.Getenv(WebhookCertFileVar)
-	keyFile := os.Getenv(WebhookKeyFileVar)
+	certFile := settings.CertFileName
+	keyFile := settings.KeyFileName
 	if certFile == "" && keyFile != "" {
 		return nil, fmt.Errorf("should specify cert file in %s if %s is not empty", WebhookCertFileVar, WebhookKeyFileVar)
 	}

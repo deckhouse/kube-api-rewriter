@@ -11,9 +11,8 @@ const (
 	ClientProxyEnv        = "CLIENT_PROXY"
 	ClientProxyAddressEnv = "CLIENT_PROXY_ADDRESS"
 	ClientProxyPortEnv    = "CLIENT_PROXY_PORT"
-	WebhookProxyEnv       = "WEBHOOK_PROXY"
-	WebhookAddrEnv        = "WEBHOOK_ADDRESS"
-	WebhookPortEnv        = "WEBHOOK_PORT"
+	WebhookListenAddrEnv  = "WEBHOOK_LISTEN_ADDRESS"
+	WebhookListenPortEnv  = "WEBHOOK_LISTEN_PORT"
 )
 
 const (

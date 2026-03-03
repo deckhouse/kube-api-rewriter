@@ -60,10 +60,10 @@ func RegisterAllMetrics() {
 
 // CreateMonitoringServer returns a monitoring server with metrics and healthz probes.
 func CreateMonitoringServer(settings *AppSettings) *server.HTTPServer {
-	lAddr := GetString(
-		settings.MonitoringBindAddress,
-		DefaultMonitoringBindAddress,
-	)
+	lAddr := settings.MonitoringBindAddress
+	if lAddr == "" {
+		lAddr = DefaultMonitoringBindAddress
+	}
 
 	monMux := http.NewServeMux()
 	healthz.AddHealthzHandler(monMux)
@@ -132,12 +132,12 @@ func CreateClientProxy(settings *AppSettings, rewriteRules *rewriter.RewriteRule
 
 // CreateWebhookProxy returns a rewriter proxy that listens for requests from the Kubernetes API server and sends them to the local webhook server.
 func CreateWebhookProxy(settings *AppSettings, rewriteRules *rewriter.RewriteRules) *server.HTTPServer {
-	if settings.WebhookProxy == "no" {
-		log.Info("Configured to not start webhook rewriter proxy")
+	if settings.WebhookTargetSettings.Address == "" {
+		log.Info("Configured to not start webhook rewriter proxy: no address for the target webhook server")
 		return nil
 	}
 
-	config, err := target.NewWebhookTarget()
+	config, err := target.NewWebhookTarget(settings.WebhookTargetSettings)
 	if err != nil {
 		log.Error("Configure webhook client", logutil.SlogErr(err))
 		os.Exit(1)
@@ -206,13 +206,4 @@ func RunServers(httpServers HTTPServers) int {
 		}
 	}
 	return exitCode
-}
-
-func GetString(s ...string) string {
-	for _, v := range s {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
