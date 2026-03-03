@@ -33,7 +33,6 @@ import (
 
 	"github.com/tidwall/gjson"
 
-	"github.com/deckhouse/kube-api-rewriter/pkg/kubevirt"
 	"github.com/deckhouse/kube-api-rewriter/pkg/log"
 	"github.com/deckhouse/kube-api-rewriter/pkg/rewriter"
 	"github.com/deckhouse/kube-api-rewriter/pkg/server"
@@ -500,7 +499,7 @@ func Test_run_proxy_with_pprof(t *testing.T) {
 		items := strings.Repeat(PodJSON+",", podsCount-1)
 		PodsListJSON := `{"apiVersion":"v1", "kind":"PodList", "items":[` + items + PodJSON + `]}`
 
-		rewriteRules := kubevirt.KubevirtRewriteRules
+		rewriteRules := handlerTestRules()
 		rewriteRules.Init()
 
 		rwr := &rewriter.RuleBasedRewriter{
@@ -573,7 +572,7 @@ func Test_run_proxy_with_pprof(t *testing.T) {
 			return
 		}
 
-		rewriteRules := kubevirt.KubevirtRewriteRules
+		rewriteRules := handlerTestRules()
 		rewriteRules.Init()
 
 		rwr := &rewriter.RuleBasedRewriter{
@@ -692,7 +691,7 @@ func Test_run_proxy_with_pprof(t *testing.T) {
 func Test_RewriteJSONPayload_time(t *testing.T) {
 	t.SkipNow()
 
-	rewriteRules := kubevirt.KubevirtRewriteRules
+	rewriteRules := handlerTestRules()
 	rewriteRules.Init()
 
 	rwr := &rewriter.RuleBasedRewriter{
@@ -775,4 +774,254 @@ func Test_RewriteJSONPayload_time(t *testing.T) {
 			ratio,
 		)
 	}
+}
+
+const (
+	internalPrefix = "internal.virtualization.deckhouse.io"
+	nodePrefix     = "node.virtualization.deckhouse.io"
+	rootPrefix     = "virtualization.deckhouse.io"
+)
+
+// handlerTestRules is an excerpt from rules used to rewrite KubeVirt
+// resources in Deckhouse Virtualization Platform.
+// TODO: create test rules not related to specific controller or operator.
+func handlerTestRules() *rewriter.RewriteRules {
+	return &rewriter.RewriteRules{
+		KindPrefix:         "InternalVirtualization", // VirtualMachine -> InternalVirtualizationVirtualMachine
+		ResourceTypePrefix: "internalvirtualization", // virtualmachines -> internalvirtualizationvirtualmachines
+		ShortNamePrefix:    "intvirt",                // kubectl get intvirtvm
+		Categories:         []string{"intvirt"},      // kubectl get intvirt to see all KubeVirt and CDI resources.
+		Rules:              KubevirtAPIGroupsRules,
+		Webhooks:           KubevirtWebhooks,
+		Labels: rewriter.MetadataReplace{
+			Names: []rewriter.MetadataReplaceRule{
+				{Original: "cdi.kubevirt.io", Renamed: "cdi." + internalPrefix},
+				{Original: "kubevirt.io", Renamed: "kubevirt." + internalPrefix},
+				{Original: "operator.kubevirt.io", Renamed: "operator.kubevirt." + internalPrefix},
+				{Original: "prometheus.kubevirt.io", Renamed: "prometheus.kubevirt." + internalPrefix},
+				{Original: "prometheus.cdi.kubevirt.io", Renamed: "prometheus.cdi." + internalPrefix},
+				// Special cases.
+				{Original: "node-labeller.kubevirt.io/skip-node", Renamed: "node-labeller." + rootPrefix + "/skip-node"},
+				{Original: "node-labeller.kubevirt.io/obsolete-host-model", Renamed: "node-labeller." + internalPrefix + "/obsolete-host-model"},
+				{
+					Original: "app.kubernetes.io/managed-by", OriginalValue: "cdi-operator",
+					Renamed: "app.kubernetes.io/managed-by", RenamedValue: "cdi-operator-internal-virtualization",
+				},
+				{
+					Original: "app.kubernetes.io/managed-by", OriginalValue: "cdi-controller",
+					Renamed: "app.kubernetes.io/managed-by", RenamedValue: "cdi-controller-internal-virtualization",
+				},
+				{
+					Original: "app.kubernetes.io/managed-by", OriginalValue: "virt-operator",
+					Renamed: "app.kubernetes.io/managed-by", RenamedValue: "virt-operator-internal-virtualization",
+				},
+				{
+					Original: "app.kubernetes.io/managed-by", OriginalValue: "kubevirt-operator",
+					Renamed: "app.kubernetes.io/managed-by", RenamedValue: "kubevirt-operator-internal-virtualization",
+				},
+			},
+			Prefixes: []rewriter.MetadataReplaceRule{
+				// CDI related labels.
+				{Original: "cdi.kubevirt.io", Renamed: "cdi." + internalPrefix},
+				{Original: "operator.cdi.kubevirt.io", Renamed: "operator.cdi." + internalPrefix},
+				{Original: "prometheus.cdi.kubevirt.io", Renamed: "prometheus.cdi." + internalPrefix},
+				{Original: "upload.cdi.kubevirt.io", Renamed: "upload.cdi." + internalPrefix},
+				// KubeVirt related labels.
+				{Original: "kubevirt.io", Renamed: "kubevirt." + internalPrefix},
+				{Original: "prometheus.kubevirt.io", Renamed: "prometheus.kubevirt." + internalPrefix},
+				{Original: "operator.kubevirt.io", Renamed: "operator.kubevirt." + internalPrefix},
+				{Original: "vm.kubevirt.io", Renamed: "vm.kubevirt." + internalPrefix},
+				// Node features related labels.
+				// Note: these labels are not "internal".
+				{Original: "cpu-feature.node.kubevirt.io", Renamed: "cpu-feature." + nodePrefix},
+				{Original: "cpu-model-migration.node.kubevirt.io", Renamed: "cpu-model-migration." + nodePrefix},
+				{Original: "cpu-model.node.kubevirt.io", Renamed: "cpu-model." + nodePrefix},
+				{Original: "cpu-timer.node.kubevirt.io", Renamed: "cpu-timer." + nodePrefix},
+				{Original: "cpu-vendor.node.kubevirt.io", Renamed: "cpu-vendor." + nodePrefix},
+				{Original: "scheduling.node.kubevirt.io", Renamed: "scheduling." + nodePrefix},
+				{Original: "host-model-cpu.node.kubevirt.io", Renamed: "host-model-cpu." + nodePrefix},
+				{Original: "host-model-required-features.node.kubevirt.io", Renamed: "host-model-required-features." + nodePrefix},
+				{Original: "hyperv.node.kubevirt.io", Renamed: "hyperv." + nodePrefix},
+				{Original: "machine-type.node.kubevirt.io", Renamed: "machine-type." + nodePrefix},
+			},
+		},
+		Annotations: rewriter.MetadataReplace{
+			Prefixes: []rewriter.MetadataReplaceRule{
+				// CDI related annotations.
+				{Original: "cdi.kubevirt.io", Renamed: "cdi." + internalPrefix},
+				{Original: "operator.cdi.kubevirt.io", Renamed: "operator.cdi." + internalPrefix},
+				// KubeVirt related annotations.
+				{Original: "kubevirt.io", Renamed: "kubevirt." + internalPrefix},
+				{Original: "certificates.kubevirt.io", Renamed: "certificates.kubevirt." + internalPrefix},
+			},
+		},
+		Finalizers: rewriter.MetadataReplace{
+			Prefixes: []rewriter.MetadataReplaceRule{
+				{Original: "kubevirt.io", Renamed: "kubevirt." + internalPrefix},
+				{Original: "operator.cdi.kubevirt.io", Renamed: "operator.cdi." + internalPrefix},
+			},
+		},
+		Excludes: []rewriter.ExcludeRule{
+			rewriter.ExcludeRule{
+				Kinds: []string{
+					"PersistentVolumeClaim",
+					"PersistentVolume",
+					"Pod",
+				},
+				MatchLabels: map[string]string{
+					"app.kubernetes.io/managed-by": "cdi-controller",
+				},
+			},
+			rewriter.ExcludeRule{
+				Kinds: []string{
+					"CDI",
+				},
+				MatchNames: []string{
+					"cdi",
+				},
+			},
+		},
+	}
+}
+
+var KubevirtAPIGroupsRules = map[string]rewriter.APIGroupRule{
+	"cdi.kubevirt.io": {
+		GroupRule: rewriter.GroupRule{
+			Group:            "cdi.kubevirt.io",
+			Versions:         []string{"v1beta1"},
+			PreferredVersion: "v1beta1",
+			Renamed:          "cdi." + internalPrefix,
+		},
+		ResourceRules: map[string]rewriter.ResourceRule{
+			// cdiconfigs.cdi.kubevirt.io
+			"cdiconfigs": {
+				Kind:             "CDIConfig",
+				ListKind:         "CDIConfigList",
+				Plural:           "cdiconfigs",
+				Singular:         "cdiconfig",
+				Versions:         []string{"v1beta1"},
+				PreferredVersion: "v1beta1",
+				Categories:       []string{},
+				ShortNames:       []string{},
+			},
+			// cdis.cdi.kubevirt.io
+			"cdis": {
+				Kind:             "CDI",
+				ListKind:         "CDIList",
+				Plural:           "cdis",
+				Singular:         "cdi",
+				Versions:         []string{"v1beta1"},
+				PreferredVersion: "v1beta1",
+				Categories:       []string{},
+				ShortNames:       []string{"cdi", "cdis"},
+			},
+			// datavolumes.cdi.kubevirt.io
+			"datavolumes": {
+				Kind:             "DataVolume",
+				ListKind:         "DataVolumeList",
+				Plural:           "datavolumes",
+				Singular:         "datavolume",
+				Versions:         []string{"v1beta1"},
+				PreferredVersion: "v1beta1",
+				Categories:       []string{"all"},
+				ShortNames:       []string{"dv", "dvs"},
+			},
+			// storageprofiles.cdi.kubevirt.io
+			"storageprofiles": {
+				Kind:             "StorageProfile",
+				ListKind:         "StorageProfileList",
+				Plural:           "storageprofiles",
+				Singular:         "storageprofile",
+				Versions:         []string{"v1beta1"},
+				PreferredVersion: "v1beta1",
+				Categories:       []string{},
+				ShortNames:       []string{},
+			},
+		},
+	},
+	"kubevirt.io": {
+		GroupRule: rewriter.GroupRule{
+			Group:            "kubevirt.io",
+			Versions:         []string{"v1", "v1alpha3"},
+			PreferredVersion: "v1",
+			Renamed:          "internal.virtualization.deckhouse.io",
+		},
+		ResourceRules: map[string]rewriter.ResourceRule{
+			// kubevirts.kubevirt.io
+			"kubevirts": {
+				Kind:             "KubeVirt",
+				ListKind:         "KubeVirtList",
+				Plural:           "kubevirts",
+				Singular:         "kubevirt",
+				Versions:         []string{"v1", "v1alpha3"},
+				PreferredVersion: "v1",
+				Categories:       []string{"all"},
+				ShortNames:       []string{"kv", "kvs"},
+			},
+			// virtualmachines.kubevirt.io
+			"virtualmachines": {
+				Kind:             "VirtualMachine",
+				ListKind:         "VirtualMachineList",
+				Plural:           "virtualmachines",
+				Singular:         "virtualmachine",
+				Versions:         []string{"v1", "v1alpha3"},
+				PreferredVersion: "v1",
+				Categories:       []string{"all"},
+				ShortNames:       []string{"vm", "vms"},
+			},
+			// virtualmachineinstances.kubevirt.io
+			"virtualmachineinstances": {
+				Kind:             "VirtualMachineInstance",
+				ListKind:         "VirtualMachineInstanceList",
+				Plural:           "virtualmachineinstances",
+				Singular:         "virtualmachineinstance",
+				Versions:         []string{"v1", "v1alpha3"},
+				PreferredVersion: "v1",
+				Categories:       []string{"all"},
+				ShortNames:       []string{"vmi", "vmsi"},
+			},
+			// virtualmachineinstancemigrations.kubevirt.io
+			"virtualmachineinstancemigrations": {
+				Kind:             "VirtualMachineInstanceMigration",
+				ListKind:         "VirtualMachineInstanceMigrationList",
+				Plural:           "virtualmachineinstancemigrations",
+				Singular:         "virtualmachineinstancemigration",
+				Versions:         []string{"v1", "v1alpha3"},
+				PreferredVersion: "v1",
+				Categories:       []string{"all"},
+				ShortNames:       []string{"vmim", "vmims"},
+			},
+		},
+	},
+}
+
+var KubevirtWebhooks = map[string]rewriter.WebhookRule{
+	// CDI webhooks.
+	"/datavolume-validate": {
+		Path:     "/datavolume-validate",
+		Group:    "cdi.kubevirt.io",
+		Resource: "datavolumes",
+	},
+	"/cdi-validate": {
+		Path:     "/cdi-validate",
+		Group:    "cdi.kubevirt.io",
+		Resource: "cdis",
+	},
+
+	// Kubevirt webhooks.
+	"/virtualmachineinstances-validate-create": {
+		Path:     "/virtualmachineinstances-validate-create",
+		Group:    "kubevirt.io",
+		Resource: "virtualmachineinstances",
+	},
+	"/virtualmachineinstances-validate-update": {
+		Path:     "/virtualmachineinstances-validate-update",
+		Group:    "kubevirt.io",
+		Resource: "virtualmachineinstances",
+	},
+	"/virtualmachines-validate": {
+		Path:     "/virtualmachines-validate",
+		Group:    "kubevirt.io",
+		Resource: "virtualmachines",
+	},
 }
