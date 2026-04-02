@@ -23,6 +23,7 @@ const (
 
 const (
 	MonitoringBindAddressEnv     = "MONITORING_BIND_ADDRESS"
+	MonitoringAuthEnv            = "MONITORING_AUTH"
 	DefaultMonitoringBindAddress = ":9090"
 	PprofBindAddressEnv          = "PPROF_BIND_ADDRESS"
 )

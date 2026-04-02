@@ -22,13 +22,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func AddMetricsHandler(mux *http.ServeMux) {
-	if mux == nil {
-		return
-	}
-
-	handler := promhttp.HandlerFor(Registry, promhttp.HandlerOpts{
+func NewHandler() http.Handler {
+	return promhttp.HandlerFor(Registry, promhttp.HandlerOpts{
 		ErrorHandling: promhttp.HTTPErrorOnError,
 	})
+}
+
+func AddMetricsHandler(mux *http.ServeMux, handler http.Handler) {
 	mux.Handle("/metrics", handler)
 }
