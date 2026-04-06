@@ -4,6 +4,9 @@ import (
 	"os"
 
 	"github.com/deckhouse/kube-api-rewriter/pkg/target"
+	"github.com/deckhouse/kube-api-rewriter/pkg/middleware/auth"
+	"encoding/json"
+	"fmt"
 )
 
 // AppSettings configures kube-api-rewriter application.
@@ -33,11 +36,18 @@ type AppSettings struct {
 	// MonitoringBindAddress is a listen address for the metrics server. Default is :9090. Can be set at runtime with MONITORING_BIND_ADDRESS environment variable.
 	MonitoringBindAddress string
 
+	// MonitoringAuth holds settings for the authentication via kubernetes rbac
+	MonitoringAuth *auth.ResourceAttributes
+
 	// PprofBindAddress is a listen address for the pprof server. Should be set to enable pprof. Can be set at runtime with PPROF_BIND_ADDRESS environment variable.
 	PprofBindAddress string
 }
 
-func SettingsFromEnv() *AppSettings {
+func SettingsFromEnv() (*AppSettings, error) {
+	monitoringAuth, err := monitoringAuthFromEnv()
+	if err != nil {
+		return nil, err
+	}
 	return &AppSettings{
 		ClientProxy:           os.Getenv(ClientProxyEnv),
 		ClientProxyAddress:    os.Getenv(ClientProxyAddressEnv),
@@ -49,6 +59,21 @@ func SettingsFromEnv() *AppSettings {
 		LogFormat:             os.Getenv(LogFormatEnv),
 		LogOutput:             os.Getenv(LogOutputEnv),
 		MonitoringBindAddress: os.Getenv(MonitoringBindAddressEnv),
+		MonitoringAuth:        monitoringAuth,
 		PprofBindAddress:      os.Getenv(PprofBindAddressEnv),
+	}, nil
+}
+
+func monitoringAuthFromEnv() (*auth.ResourceAttributes, error) {
+	if env, ok := os.LookupEnv(MonitoringAuthEnv); ok {
+		monitoringAuth := &auth.ResourceAttributes{}
+		if err := json.Unmarshal([]byte(env), monitoringAuth); err != nil {
+			return nil, fmt.Errorf("failed to parse monitoring auth env: %w", err)
+		}
+		if err := monitoringAuth.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid monitoring auth env: %w", err)
+		}
+		return monitoringAuth, nil
 	}
+	return nil, nil
 }

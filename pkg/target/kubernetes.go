@@ -23,10 +23,12 @@ import (
 
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
+	"k8s.io/client-go/kubernetes"
 )
 
 type Kubernetes struct {
 	Config       *rest.Config
+	KubeClient   kubernetes.Interface
 	Client       *http.Client
 	APIServerURL *url.URL
 }
@@ -38,6 +40,11 @@ func NewKubernetesTarget() (*Kubernetes, error) {
 	k.Config, err = config.GetConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load Kubernetes client config: %w", err)
+	}
+
+	k.KubeClient, err = kubernetes.NewForConfig(k.Config)
+	if err != nil {
+		return nil, fmt.Errorf("create Kubernetes client: %w", err)
 	}
 
 	// Configure HTTP client to Kubernetes API server.

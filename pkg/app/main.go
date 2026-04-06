@@ -6,6 +6,7 @@ import (
 	"os"
 
 	logutil "github.com/deckhouse/kube-api-rewriter/pkg/log"
+	"github.com/deckhouse/kube-api-rewriter/pkg/middleware/auth"
 	"github.com/deckhouse/kube-api-rewriter/pkg/monitoring/healthz"
 	"github.com/deckhouse/kube-api-rewriter/pkg/monitoring/metrics"
 	"github.com/deckhouse/kube-api-rewriter/pkg/monitoring/profiler"
@@ -17,7 +18,12 @@ import (
 
 // StartFromEnv starts application using settings from environment variables.
 func StartFromEnv(rewriteRules *rewriter.RewriteRules) {
-	Start(SettingsFromEnv(), rewriteRules)
+	settings, err := SettingsFromEnv()
+	if err != nil {
+		log.Error("failed to get settings from env", logutil.SlogErr(err))
+		os.Exit(1)
+	}
+	Start(settings, rewriteRules)
 }
 
 func Start(settings *AppSettings, rewriteRules *rewriter.RewriteRules) {
@@ -32,10 +38,16 @@ func Start(settings *AppSettings, rewriteRules *rewriter.RewriteRules) {
 
 	RegisterAllMetrics()
 
+	config, err := target.NewKubernetesTarget()
+	if err != nil {
+		log.Error("Load Kubernetes REST", logutil.SlogErr(err))
+		os.Exit(1)
+	}
+
 	httpServers := HTTPServers{
-		Monitoring:   CreateMonitoringServer(settings),
+		Monitoring:   CreateMonitoringServer(settings, config),
 		Pprof:        CreatePprofServer(settings),
-		ClientProxy:  CreateClientProxy(settings, rewriteRules),
+		ClientProxy:  CreateClientProxy(settings, rewriteRules, config),
 		WebhookProxy: CreateWebhookProxy(settings, rewriteRules),
 	}
 
@@ -59,7 +71,7 @@ func RegisterAllMetrics() {
 }
 
 // CreateMonitoringServer returns a monitoring server with metrics and healthz probes.
-func CreateMonitoringServer(settings *AppSettings) *server.HTTPServer {
+func CreateMonitoringServer(settings *AppSettings, config *target.Kubernetes) *server.HTTPServer {
 	lAddr := settings.MonitoringBindAddress
 	if lAddr == "" {
 		lAddr = DefaultMonitoringBindAddress
@@ -67,7 +79,12 @@ func CreateMonitoringServer(settings *AppSettings) *server.HTTPServer {
 
 	monMux := http.NewServeMux()
 	healthz.AddHealthzHandler(monMux)
-	metrics.AddMetricsHandler(monMux)
+
+	metricsHandler := metrics.NewHandler()
+	if settings.MonitoringAuth != nil {
+		metricsHandler = auth.NewMiddlewareFromKubeClient(config.KubeClient, *settings.MonitoringAuth).Handler(metricsHandler)
+	}
+	metrics.AddMetricsHandler(monMux, metricsHandler)
 
 	return &server.HTTPServer{
 		InstanceDesc: "Monitoring handlers",
@@ -94,17 +111,12 @@ func CreatePprofServer(settings *AppSettings) *server.HTTPServer {
 }
 
 // CreateClientProxy returns a rewriter proxy that listens for requests from the controller and sends them to the Kubernetes API server.
-func CreateClientProxy(settings *AppSettings, rewriteRules *rewriter.RewriteRules) *server.HTTPServer {
+func CreateClientProxy(settings *AppSettings, rewriteRules *rewriter.RewriteRules, config *target.Kubernetes) *server.HTTPServer {
 	if settings.ClientProxy == "no" {
 		log.Info("Configured to not start client rewriter proxy")
 		return nil
 	}
 
-	config, err := target.NewKubernetesTarget()
-	if err != nil {
-		log.Error("Load Kubernetes REST", logutil.SlogErr(err))
-		os.Exit(1)
-	}
 	lAddr := server.ConstructListenAddr(
 		settings.ClientProxyAddress,
 		settings.ClientProxyPort,
