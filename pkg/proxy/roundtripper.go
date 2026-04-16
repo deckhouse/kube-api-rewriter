@@ -184,7 +184,6 @@ func (rt *RoundTripper) initialize() {
 		rt.streamHandler = &StreamHandler{
 			Rewriter:        rt.Rewriter,
 			MetricsProvider: rt.MetricsProvider,
-			Action:          FromTargetAction(rt.ProxyMode),
 		}
 	}
 }
