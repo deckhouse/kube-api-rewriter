@@ -90,6 +90,24 @@ func (s *StreamHandler) Handle(ctx context.Context, w http.ResponseWriter, resp 
 	return nil
 }
 
+// Rewrite reads a watch stream from resp, rewrites its events and writes them to dst.
+func (s *StreamHandler) Rewrite(ctx context.Context, dst io.Writer, resp *http.Response, targetReq *rewriter.TargetRequest) error {
+	rewriterInstance := &streamRewriter{
+		dst:       dst,
+		targetReq: targetReq,
+		rewriter:  s.Rewriter,
+		done:      make(chan struct{}),
+		log:       LoggerWithCommonAttrs(ctx),
+		metrics:   NewProxyMetrics(ctx, s.MetricsProvider),
+	}
+	err := rewriterInstance.init(resp)
+	if err != nil {
+		return err
+	}
+
+	rewriterInstance.start(ctx)
+	return nil
+}
 func (s *streamRewriter) init(resp *http.Response) (err error) {
 	s.bytesCounter = BytesCounterReaderWrap(resp.Body)
 	s.src = s.bytesCounter
@@ -160,14 +178,16 @@ func (s *streamRewriter) start(ctx context.Context) {
 			s.metrics.RequestHandleError()
 			// There is nothing to send to the client: no event decoded.
 		} else {
-			rwrEvent, err = s.transformWatchEvent(&got)
-			if err != nil && errors.Is(err, rewriter.SkipItem) {
-				s.log.Warn(fmt.Sprintf("Watch event '%s': skipped by rewriter", got.Type), logutil.SlogErr(err))
+			var transformErr error
+			rwrEvent, transformErr = s.transformWatchEvent(&got)
+
+			if transformErr != nil && errors.Is(transformErr, rewriter.SkipItem) {
+				s.log.Warn(fmt.Sprintf("Watch event '%s': skipped by rewriter", got.Type), logutil.SlogErr(transformErr))
 				logutil.DebugBodyHead(s.log, fmt.Sprintf("Watch event '%s' skipped", got.Type), s.targetReq.ResourceForLog(), got.Object.Raw)
 				s.metrics.RequestHandleSuccess()
 			} else {
-				if err != nil {
-					s.log.Error(fmt.Sprintf("Watch event '%s': transform error", got.Type), logutil.SlogErr(err))
+				if transformErr != nil {
+					s.log.Error(fmt.Sprintf("Watch event '%s': transform error", got.Type), logutil.SlogErr(transformErr))
 					logutil.DebugBodyHead(s.log, fmt.Sprintf("Watch event '%s'", got.Type), s.targetReq.ResourceForLog(), got.Object.Raw)
 				}
 				if rwrEvent == nil {
@@ -179,6 +199,7 @@ func (s *streamRewriter) start(ctx context.Context) {
 				}
 				// Pass event to the client.
 				logutil.DebugBodyHead(s.log, fmt.Sprintf("WatchEvent type '%s' send back to client %d bytes", rwrEvent.Type, len(rwrEvent.Object.Raw)), s.targetReq.ResourceForLog(), rwrEvent.Object.Raw)
+
 				s.writeEvent(rwrEvent)
 			}
 		}
@@ -299,10 +320,10 @@ func (s *streamRewriter) writeEvent(ev *metav1.WatchEvent) {
 	copied, err := s.dst.Write(rwrEventBytes)
 	if err != nil {
 		s.log.Error("Watch event: error writing event to the client", logutil.SlogErr(err))
+		s.metrics.RequestHandleError()
+	} else {
 		s.metrics.RequestHandleSuccess()
 		s.metrics.ToClientBytesAdd(copied)
-	} else {
-		s.metrics.RequestHandleError()
 	}
 	// Flush writer to immediately send any buffered content to the client.
 	if wr, ok := s.dst.(http.Flusher); ok {
